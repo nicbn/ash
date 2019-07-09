@@ -366,6 +366,7 @@ pub fn platform_specific_types() -> Tokens {
         #[allow(non_camel_case_types)]
         pub type wl_surface = c_void;
         pub type HANDLE = *mut c_void;
+        pub type HMONITOR = HANDLE;
         pub type DWORD = c_ulong;
         pub type LPCWSTR = *const u16;
         #[allow(non_camel_case_types)]
@@ -378,6 +379,11 @@ pub fn platform_specific_types() -> Tokens {
         // Opage types
         pub type ANativeWindow = c_void;
         pub type AHardwareBuffer = c_void;
+        // I guessed the type definition here because they are apperantly under NDA, inside the
+        // Stadia SDK.
+        pub type GgpStreamDescriptor = u32;
+        pub type GgpFrameToken = u32;
+        pub type CAMetalLayer = c_void;
     }
 }
 #[derive(Debug, Copy, Clone)]
@@ -703,6 +709,19 @@ fn generate_function_pointers<'a>(
     commands: &[&'a vkxml::Command],
     fn_cache: &mut HashSet<&'a str>,
 ) -> quote::Tokens {
+    // We filter commands so that we don't have duplicates
+    let commands: Vec<_> = commands
+        .iter()
+        .filter(|cmd| {
+            let ident = cmd.name.as_str();
+            if !fn_cache.contains(ident) {
+                fn_cache.insert(ident);
+                return true;
+            } else {
+                return false;
+            }
+        })
+        .collect();
     let names: Vec<_> = commands.iter().map(|cmd| cmd.command_ident()).collect();
     let names_ref = &names;
     let names_ref1 = &names;
@@ -716,19 +735,6 @@ fn generate_function_pointers<'a>(
     let names_left = &names;
     let names_right = &names;
     let khronos_links: Vec<_> = raw_names.iter().map(|name| khronos_link(name)).collect();
-
-    let pfn_commands: Vec<_> = commands
-        .iter()
-        .filter(|cmd| {
-            let ident = cmd.name.as_str();
-            if !fn_cache.contains(ident) {
-                fn_cache.insert(ident);
-                return true;
-            } else {
-                return false;
-            }
-        })
-        .collect();
 
     let params: Vec<Vec<(Ident, Tokens)>> = commands
         .iter()
@@ -787,13 +793,13 @@ fn generate_function_pointers<'a>(
         .collect();
     let return_types_ref = &return_types;
 
-    let pfn_names: Vec<_> = pfn_commands
+    let pfn_names: Vec<_> = commands
         .iter()
         .map(|cmd| Ident::from(format!("PFN_{}", cmd.name.as_str())))
         .collect();
     let pfn_names_ref = &pfn_names;
 
-    let signature_params: Vec<Vec<_>> = pfn_commands
+    let signature_params: Vec<Vec<_>> = commands
         .iter()
         .map(|cmd| {
             let params: Vec<_> = cmd
@@ -810,7 +816,7 @@ fn generate_function_pointers<'a>(
         .collect();
     let signature_params_ref = &signature_params;
 
-    let pfn_return_types: Vec<_> = pfn_commands
+    let pfn_return_types: Vec<_> = commands
         .iter()
         .map(|cmd| cmd.return_type.type_tokens(true))
         .collect();
@@ -1277,7 +1283,7 @@ pub fn derive_default(_struct: &vkxml::Struct) -> Option<Tokens> {
 
     // This are also pointers, and therefor also don't implement Default. The spec
     // also doesn't mark them as pointers
-    let handles = ["LPCWSTR", "HANDLE", "HINSTANCE", "HWND"];
+    let handles = ["LPCWSTR", "HANDLE", "HINSTANCE", "HWND", "HMONITOR"];
     let contains_ptr = members.clone().any(|field| field.reference.is_some());
     let contains_strucutre_type = members.clone().any(is_structure_type);
     let contains_static_array = members.clone().any(is_static_array);
